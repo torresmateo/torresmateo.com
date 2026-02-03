@@ -1,0 +1,25 @@
+---
+import { type CollectionEntry, getCollection, render } from 'astro:content';
+import BlogPost from '../../layouts/BlogPost.astro';
+
+export async function getStaticPaths() {
+	const posts = await getCollection('blog-es');
+	return posts.map((post) => {
+		// Remove date prefix (YYYY-MM-DD-) from slug
+		const slug = post.id.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+		return {
+			params: { slug },
+			props: post,
+		};
+	});
+}
+
+type Props = CollectionEntry<'blog-es'>;
+
+const post = Astro.props;
+const { Content } = await render(post);
+---
+
+<BlogPost {...post.data} lang="es">
+	<Content />
+</BlogPost>

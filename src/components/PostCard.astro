@@ -1,0 +1,74 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import FormattedDate from './FormattedDate.astro';
+
+interface Props {
+	post: CollectionEntry<'blog'> | CollectionEntry<'blog-es'>;
+	href: string;
+}
+
+const { post, href } = Astro.props;
+---
+
+<div class="post-card">
+	<a href={href}>
+		<h3>{post.data.title}</h3>
+		<p class="date">
+			<FormattedDate date={post.data.pubDate} />
+		</p>
+		<p class="description">{post.data.description}</p>
+		{post.data.categories && post.data.categories.length > 0 && (
+			<div class="categories">
+				{post.data.categories.map((cat: string) => (
+					<span class="category">{cat}</span>
+				))}
+			</div>
+		)}
+	</a>
+</div>
+
+<style>
+	.post-card {
+		margin-bottom: 2em;
+		padding: 1.5em;
+		background: white;
+		border-radius: 8px;
+		box-shadow: 0 2px 8px rgba(var(--black), 5%);
+		transition: transform 0.2s, box-shadow 0.2s;
+	}
+	.post-card:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 4px 16px rgba(var(--black), 10%);
+	}
+	.post-card a {
+		text-decoration: none;
+		color: rgb(var(--gray-dark));
+	}
+	.post-card h3 {
+		margin: 0 0 0.5em 0;
+		color: rgb(var(--black));
+		font-size: 1.5em;
+	}
+	.date {
+		color: rgb(var(--gray));
+		font-size: 0.9em;
+		margin: 0 0 0.5em 0;
+	}
+	.description {
+		margin: 0.5em 0;
+		line-height: 1.5;
+	}
+	.categories {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5em;
+		margin-top: 1em;
+	}
+	.category {
+		font-size: 0.85em;
+		padding: 0.25em 0.75em;
+		background: rgb(var(--accent-light));
+		color: rgb(var(--accent-dark));
+		border-radius: 4px;
+	}
+</style>

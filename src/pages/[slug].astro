@@ -1,0 +1,44 @@
+---
+import { type CollectionEntry, getCollection, render } from 'astro:content';
+import BlogPost from '../layouts/BlogPost.astro';
+import Paper from '../layouts/Paper.astro';
+
+export async function getStaticPaths() {
+	const blogPosts = await getCollection('blog');
+	const papers = await getCollection('papers');
+
+	const blogPaths = blogPosts.map((post) => {
+		// Remove date prefix (YYYY-MM-DD-) from slug
+		const slug = post.id.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+		return {
+			params: { slug },
+			props: { entry: post, type: 'blog' },
+		};
+	});
+
+	const paperPaths = papers.map((paper) => ({
+		params: { slug: paper.id },
+		props: { entry: paper, type: 'paper' },
+	}));
+
+	return [...blogPaths, ...paperPaths];
+}
+
+type Props = {
+	entry: CollectionEntry<'blog'> | CollectionEntry<'papers'>;
+	type: 'blog' | 'paper';
+};
+
+const { entry, type } = Astro.props;
+const { Content } = await render(entry);
+---
+
+{type === 'blog' ? (
+	<BlogPost {...entry.data}>
+		<Content />
+	</BlogPost>
+) : (
+	<Paper {...entry.data}>
+		<Content />
+	</Paper>
+)}

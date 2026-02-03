@@ -2,10 +2,10 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 
-const title = 'Blog Archive';
-const description = 'All blog posts';
+const title = 'Blog en Español';
+const description = 'Todas las publicaciones en español';
 
-const posts = (await getCollection('blog')).sort(
+const posts = (await getCollection('blog-es')).sort(
 	(a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
 ).map(post => ({
 	...post,
@@ -14,29 +14,33 @@ const posts = (await getCollection('blog')).sort(
 ---
 
 <BaseLayout title={title} description={description}>
-	<h1>Blog Archive</h1>
-	<p>All posts in English. <a href="/es/">Ver posts en español →</a></p>
+	<h1>Blog en Español</h1>
+	<p>Todas las publicaciones en español. <a href="/blog/">View English posts →</a></p>
 
-	<table>
-		<thead>
-			<tr>
-				<th>Date</th>
-				<th>Title</th>
-				<th>Description</th>
-				<th>Link</th>
-			</tr>
-		</thead>
-		<tbody>
-			{posts.map((post) => (
+	{posts.length === 0 ? (
+		<p><em>No hay publicaciones todavía. (No posts yet.)</em></p>
+	) : (
+		<table>
+			<thead>
 				<tr>
-					<td>{post.data.pubDate.toISOString().split('T')[0]}</td>
-					<td><a href={`/${post.slug}/`}>{post.data.title}</a></td>
-					<td>{post.data.description}</td>
-					<td><a href={`/${post.slug}/`} class="btn">Read →</a></td>
+					<th>Fecha</th>
+					<th>Título</th>
+					<th>Descripción</th>
+					<th>Link</th>
 				</tr>
-			))}
-		</tbody>
-	</table>
+			</thead>
+			<tbody>
+				{posts.map((post) => (
+					<tr>
+						<td>{post.data.pubDate.toISOString().split('T')[0]}</td>
+						<td><a href={`/es/${post.slug}/`}>{post.data.title}</a></td>
+						<td>{post.data.description}</td>
+						<td><a href={`/es/${post.slug}/`} class="btn">Leer →</a></td>
+					</tr>
+				))}
+			</tbody>
+		</table>
+	)}
 </BaseLayout>
 
 <style>

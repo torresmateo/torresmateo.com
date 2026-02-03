@@ -1,0 +1,73 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import FormattedDate from './FormattedDate.astro';
+
+interface Props {
+	paper: CollectionEntry<'papers'>;
+	href: string;
+}
+
+const { paper, href } = Astro.props;
+---
+
+<div class="paper-card">
+	<a href={href}>
+		<h3>{paper.data.title}</h3>
+		<div class="citation">
+			<p class="authors">{paper.data.refAuthors}</p>
+			<p class="journal">
+				<em>{paper.data.refJournal}</em>{paper.data.refVol && `, ${paper.data.refVol}`} ({paper.data.refYear})
+			</p>
+			{paper.data.refDoi && (
+				<p class="doi">DOI: {paper.data.refDoi}</p>
+			)}
+		</div>
+		<p class="description">{paper.data.description}</p>
+	</a>
+</div>
+
+<style>
+	.paper-card {
+		margin-bottom: 2em;
+		padding: 1.5em;
+		background: white;
+		border-radius: 8px;
+		border-left: 4px solid rgb(var(--accent));
+		box-shadow: 0 2px 8px rgba(var(--black), 5%);
+		transition: transform 0.2s, box-shadow 0.2s;
+	}
+	.paper-card:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 4px 16px rgba(var(--black), 10%);
+	}
+	.paper-card a {
+		text-decoration: none;
+		color: rgb(var(--gray-dark));
+	}
+	.paper-card h3 {
+		margin: 0 0 0.5em 0;
+		color: rgb(var(--black));
+		font-size: 1.3em;
+	}
+	.citation {
+		margin: 0.5em 0;
+		font-size: 0.9em;
+	}
+	.authors {
+		margin: 0.3em 0;
+		color: rgb(var(--gray-dark));
+	}
+	.journal {
+		margin: 0.3em 0;
+		color: rgb(var(--gray));
+	}
+	.doi {
+		margin: 0.3em 0;
+		font-size: 0.85em;
+		color: rgb(var(--accent-dark));
+	}
+	.description {
+		margin: 1em 0 0 0;
+		line-height: 1.5;
+	}
+</style>

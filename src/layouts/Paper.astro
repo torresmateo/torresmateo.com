@@ -1,0 +1,96 @@
+---
+import { Image } from 'astro:assets';
+import type { CollectionEntry } from 'astro:content';
+import BaseHead from '../components/BaseHead.astro';
+import Footer from '../components/Footer.astro';
+import FormattedDate from '../components/FormattedDate.astro';
+import Header from '../components/Header.astro';
+
+type Props = CollectionEntry<'papers'>['data'];
+
+const { title, description, pubDate, updatedDate, heroImage, refAuthors, refYear, refTitle, refJournal, refVol, refDoi } = Astro.props;
+---
+
+<html lang="en">
+	<head>
+		<BaseHead title={title} description={description} />
+	</head>
+
+	<body>
+		<Header />
+		<main>
+			<article>
+				<h1>{title}</h1>
+
+				<table class="citation-table">
+					<thead>
+						<tr>
+							<th colspan="2">Publication Details</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><strong>Authors</strong></td>
+							<td>{refAuthors}</td>
+						</tr>
+						<tr>
+							<td><strong>Title</strong></td>
+							<td><em>{refTitle}</em></td>
+						</tr>
+						<tr>
+							<td><strong>Journal</strong></td>
+							<td>{refJournal}{refVol && `, ${refVol}`}</td>
+						</tr>
+						<tr>
+							<td><strong>Year</strong></td>
+							<td>{refYear}</td>
+						</tr>
+						{refDoi && (
+							<tr>
+								<td><strong>DOI</strong></td>
+								<td><a href={`https://doi.org/${refDoi}`} target="_blank" rel="noopener noreferrer">{refDoi}</a></td>
+							</tr>
+						)}
+					</tbody>
+				</table>
+
+				{heroImage && (
+					<div class="hero-image">
+						<Image width={1020} height={510} src={heroImage} alt="" />
+					</div>
+				)}
+
+				<div class="content">
+					<slot />
+				</div>
+
+				<p><a href="/" class="btn">← Back to Home</a></p>
+			</article>
+		</main>
+		<Footer />
+	</body>
+</html>
+
+<style>
+	.citation-table {
+		margin: 1.5rem 0;
+	}
+
+	.citation-table td:first-child {
+		width: 20%;
+	}
+
+	.hero-image {
+		margin: 2rem 0;
+	}
+
+	.hero-image img {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	.content {
+		margin: 2rem 0;
+	}
+</style>
