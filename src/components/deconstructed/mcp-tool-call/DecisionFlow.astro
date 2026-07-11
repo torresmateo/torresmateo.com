@@ -1,0 +1,171 @@
+---
+// A language-agnostic decision flow: how a Pinehill tools/call is answered.
+// Pure SVG, no code — the spine decides the result type; transport is a
+// separate, orthogonal choice shown as an aside.
+const marker = 'dfx-arrow';
+---
+
+<figure class="dfx">
+	<div class="dfx-scroll">
+		<svg
+			viewBox="0 0 720 404"
+			class="dfx-svg"
+			xmlns="http://www.w3.org/2000/svg"
+			role="img"
+			aria-label="Decision flow for the result type of a tools/call: if it is waiting on you it returns input_required (the call ends and the client retries); else if the server itself is busy it returns a task to poll; else it returns a complete result."
+		>
+			<defs>
+				<marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+					<path d="M 0 0 L 10 5 L 0 10 z" fill="#333"></path>
+				</marker>
+			</defs>
+
+			{/* START */}
+			<rect class="dfx-start" x="30" y="8" width="300" height="44" rx="6" />
+			<text class="dfx-t dfx-b" x="180" y="35" text-anchor="middle">A <tspan class="dfx-mono">tools/call</tspan> (or a retry) arrives</text>
+			<line class="dfx-edge" x1="180" y1="52" x2="180" y2="80" marker-end={`url(#${marker})`} />
+
+			{/* Q1 — waiting on you? */}
+			<polygon class="dfx-dec" points="180,80 300,128 180,176 60,128" />
+			<text class="dfx-t" x="180" y="124" text-anchor="middle">Is it waiting on you?</text>
+			<text class="dfx-t dfx-sub" x="180" y="141" text-anchor="middle">confirm · pay · connect a calendar</text>
+
+			<line class="dfx-edge" x1="300" y1="128" x2="398" y2="128" marker-end={`url(#${marker})`} />
+			<text class="dfx-t dfx-lbl" x="349" y="120" text-anchor="middle">yes</text>
+			<rect class="dfx-out dfx-new" x="400" y="98" width="300" height="60" rx="6" />
+			<text class="dfx-t dfx-mono dfx-b" x="550" y="120" text-anchor="middle">resultType: input_required</text>
+			<text class="dfx-t dfx-sub" x="550" y="136" text-anchor="middle">the call ends; you act, then the client retries</text>
+			<text class="dfx-t dfx-tag" x="550" y="151" text-anchor="middle">storylines B · C</text>
+
+			{/* retry loop back to start */}
+			<path class="dfx-edge dfx-dash" d="M 550 98 C 550 34 452 30 334 30" marker-end={`url(#${marker})`} fill="none" />
+			<rect x="424" y="8" width="42" height="15" fill="#fff" />
+			<text class="dfx-t dfx-lbl" x="445" y="19" text-anchor="middle">retry</text>
+
+			<line class="dfx-edge" x1="180" y1="176" x2="180" y2="206" marker-end={`url(#${marker})`} />
+			<text class="dfx-t dfx-lbl" x="192" y="195">no</text>
+
+			{/* Q2 — server busy on its own? */}
+			<polygon class="dfx-dec" points="180,208 300,256 180,304 60,256" />
+			<text class="dfx-t" x="180" y="252" text-anchor="middle">Is the server busy on its own?</text>
+			<text class="dfx-t dfx-sub" x="180" y="269" text-anchor="middle">a human approves · a job runs</text>
+
+			<line class="dfx-edge" x1="300" y1="256" x2="398" y2="256" marker-end={`url(#${marker})`} />
+			<text class="dfx-t dfx-lbl" x="349" y="248" text-anchor="middle">yes</text>
+			<rect class="dfx-out dfx-new" x="400" y="226" width="300" height="60" rx="6" />
+			<text class="dfx-t dfx-mono dfx-b" x="550" y="248" text-anchor="middle">resultType: task</text>
+			<text class="dfx-t dfx-sub" x="550" y="264" text-anchor="middle">a durable handle you poll; the server's own wait</text>
+			<text class="dfx-t dfx-tag" x="550" y="279" text-anchor="middle">storylines B · C</text>
+
+			<line class="dfx-edge" x1="180" y1="304" x2="180" y2="334" marker-end={`url(#${marker})`} />
+			<text class="dfx-t dfx-lbl" x="192" y="323">no</text>
+
+			{/* complete */}
+			<rect class="dfx-out" x="30" y="334" width="300" height="60" rx="6" />
+			<text class="dfx-t dfx-mono dfx-b" x="180" y="356" text-anchor="middle">resultType: complete</text>
+			<text class="dfx-t dfx-sub" x="180" y="372" text-anchor="middle">the result, delivered right now</text>
+			<text class="dfx-t dfx-tag" x="180" y="387" text-anchor="middle">storyline A</text>
+		</svg>
+	</div>
+	<figcaption class="dfx-cap">
+		The spine decides one thing: what the result <em>says</em>.
+		<code>input_required</code> waits on <em>you</em>, and because it ends the
+		call and waits for a retry, an out-of-band step like a payment page or a
+		browser OAuth costs the server nothing while you finish. A
+		<code>task</code> waits on the <em>server</em>.
+	</figcaption>
+</figure>
+
+<style>
+	.dfx {
+		margin: 1.25rem 0 1.5rem 0;
+	}
+
+	.dfx-scroll {
+		overflow-x: auto;
+		border: 1px solid var(--border-color);
+		background: #fff;
+	}
+
+	.dfx-svg {
+		display: block;
+		width: 100%;
+		min-width: 600px;
+		max-width: 720px;
+		height: auto;
+		margin: 0 auto;
+		font-family: 'Univers', Helvetica, Arial, sans-serif;
+	}
+
+	.dfx-start {
+		fill: #f0f0f0;
+		stroke: #000;
+		stroke-width: 1.4;
+	}
+
+	.dfx-dec {
+		fill: #fff;
+		stroke: #000;
+		stroke-width: 1.4;
+	}
+
+	.dfx-out {
+		fill: #f5f5f5;
+		stroke: #000;
+		stroke-width: 1.2;
+	}
+
+	.dfx-new {
+		fill: #eef3ef;
+		stroke: var(--button-green);
+		stroke-width: 1.4;
+	}
+
+	.dfx-edge {
+		stroke: #333;
+		stroke-width: 1.4;
+		fill: none;
+	}
+
+	.dfx-dash {
+		stroke-dasharray: 5 4;
+	}
+
+	.dfx-t {
+		font-size: 12.5px;
+		fill: #000;
+	}
+
+	.dfx-b {
+		font-weight: 700;
+	}
+
+	.dfx-sub {
+		font-size: 10.5px;
+		fill: #555;
+	}
+
+	.dfx-mono {
+		font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+		font-size: 11.5px;
+	}
+
+	.dfx-lbl {
+		font-size: 10px;
+		font-style: italic;
+		fill: #666;
+	}
+
+	.dfx-tag {
+		font-size: 10px;
+		fill: var(--button-green);
+		font-weight: 700;
+	}
+
+	.dfx-cap {
+		font-size: 0.82rem;
+		color: #555;
+		margin: 0.5rem 0 0 0;
+		max-width: 46rem;
+	}
+</style>

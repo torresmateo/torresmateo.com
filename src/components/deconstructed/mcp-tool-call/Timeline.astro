@@ -1,0 +1,644 @@
+---
+import { ACTORS, getScenario } from './steps';
+import type { ActorId, Step } from './steps';
+
+interface Props {
+	scenario: string;
+}
+
+const scenario = getScenario(Astro.props.scenario);
+
+// Shared horizontal geometry: every row is an SVG with the same viewBox width,
+// so stacked rows line up into one continuous sequence diagram.
+const W = 880;
+const HEAD_H = 44;
+const LANE_X: Record<string, number> = {};
+scenario.actors.forEach((id, i) => {
+	LANE_X[id] = 60 + i * (760 / (scenario.actors.length - 1));
+});
+
+const actor = (id: ActorId) => ACTORS[id];
+const isNew = (s: Step) => !!s.news?.length;
+const color = (s: Step) => (isNew(s) ? '#4A7C59' : '#000');
+const isPaired = (s: Step) => s.kind !== 'note' && !!s.response;
+const rowH = (s: Step) => (isPaired(s) ? 58 : 34);
+
+const noteBox = (s: Step) => {
+	const xs = s.at!.map((a) => LANE_X[a]);
+	const x1 = Math.max(30, Math.min(...xs) - 115);
+	const x2 = Math.min(850, Math.max(...xs) + 115);
+	return { x: x1, w: x2 - x1 };
+};
+
+interface PayloadBlock {
+	dir: 'req' | 'res' | null;
+	label: string;
+	body: string;
+}
+
+const payloadBlocks = (s: Step): PayloadBlock[] => {
+	const blocks: PayloadBlock[] = [];
+	if (s.payload) {
+		blocks.push({
+			dir: s.kind === 'note' ? null : 'req',
+			label: s.payloadLabel ?? 'Payload',
+			body: s.payload,
+		});
+	}
+	if (s.response?.payload) {
+		blocks.push({
+			dir: 'res',
+			label: s.response.payloadLabel ?? 'The response',
+			body: s.response.payload,
+		});
+	}
+	return blocks;
+};
+
+const dirText = (s: Step, dir: PayloadBlock['dir']) => {
+	if (!dir || s.kind === 'note') return null;
+	return dir === 'req'
+		? `→ ${actor(s.from!).label} to ${actor(s.to!).label}`
+		: `← ${actor(s.to!).label} to ${actor(s.from!).label}`;
+};
+
+const markerId = `tlx-arrow-${scenario.id}`;
+
+// ── Lightweight, build-time syntax highlighter for the payload blocks. ──
+// Payloads are trusted literals from steps.ts (a mix of HTTP request lines,
+// headers, JSON bodies, URLs, form-encoded bodies, and // comments), so we
+// escape first and then wrap tokens in spans, line by line.
+const escapeHtml = (s: string) =>
+	s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const highlightJson = (line: string) =>
+	line.replace(
+		/("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?)|\b(true|false|null)\b/g,
+		(_m, str, colon, num, bool) => {
+			if (str !== undefined) {
+				return colon
+					? `<span class="tk-key">${str}</span>${colon}`
+					: `<span class="tk-str">${str}</span>`;
+			}
+			if (num !== undefined) return `<span class="tk-num">${num}</span>`;
+			return `<span class="tk-bool">${bool}</span>`;
+		},
+	);
+
+const highlight = (body: string): string =>
+	body
+		.split('\n')
+		.map((raw) => {
+			const esc = escapeHtml(raw);
+
+			// // comment line
+			const comment = raw.match(/^(\s*)(\/\/.*)$/);
+			if (comment) return `${comment[1]}<span class="tk-comment">${escapeHtml(comment[2])}</span>`;
+
+			// HTTP request line: METHOD path HTTP/x.y
+			const req = esc.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD) (\S+) (HTTP\/[\d.]+)$/);
+			if (req) return `<span class="tk-method">${req[1]}</span> <span class="tk-path">${req[2]}</span> <span class="tk-proto">${req[3]}</span>`;
+
+			// HTTP header: Name: value  (names are unquoted tokens; JSON keys are quoted)
+			const header = esc.match(/^([A-Za-z][A-Za-z0-9-]*): (.*)$/);
+			if (header) return `<span class="tk-header">${header[1]}</span>: ${header[2]}`;
+
+			// Whole-line URL
+			const url = esc.match(/^(\s*)(https?:\/\/\S+)$/);
+			if (url) return `${url[1]}<span class="tk-str">${url[2]}</span>`;
+
+			// Query / form-encoded param: ?key=value, &key=value, key=value
+			const form = esc.match(/^(\s*)([?&]?)([\w.-]+)=(.*)$/);
+			if (form) return `${form[1]}${form[2]}<span class="tk-key">${form[3]}</span>=<span class="tk-str">${form[4]}</span>`;
+
+			// JSON-ish line (has quotes or structural punctuation) → tokenize; else plain prose
+			if (esc.includes('"') || /[{}[\]]/.test(esc)) return highlightJson(esc);
+			return esc;
+		})
+		.join('\n');
+---
+
+<div class="tlx" data-tlx={scenario.id}>
+	<div class="tlx-toolbar">
+		<span class="tlx-legend">
+			<span class="tlx-key tlx-key-new"></span> new or changed in 2026‑07‑28
+			<span class="tlx-key tlx-key-res"></span> response
+			<span class="tlx-key tlx-key-note"></span> outside the protocol
+		</span>
+		<button type="button" class="tlx-toggle-all" data-state="closed">expand all</button>
+	</div>
+
+	<div class="tlx-head" aria-hidden="true">
+		<svg viewBox={`0 0 ${W} ${HEAD_H}`} class="tlx-svg" xmlns="http://www.w3.org/2000/svg">
+			{scenario.actors.map((id) => (
+				<g>
+					<text x={LANE_X[id]} y={20} text-anchor="middle" class="tlx-actor">
+						{actor(id).icon} {actor(id).label}
+					</text>
+					<text x={LANE_X[id]} y={35} text-anchor="middle" class="tlx-actor-sub">{actor(id).sublabel}</text>
+				</g>
+			))}
+		</svg>
+	</div>
+
+	{scenario.acts.map((act) => (
+		<>
+			<div class="tlx-act">
+				<span class="tlx-act-title">Act {act.numeral} · {act.title}</span>
+				<span class="tlx-act-intro" set:html={act.intro} />
+			</div>
+			{scenario.steps
+				.filter((s) => s.act === act.id)
+				.map((s) => (
+					<details class="tlx-row" id={`s-${scenario.id}-${s.n}`} data-new={isNew(s) ? 'true' : undefined}>
+						<summary class="tlx-summary" title={`${s.n}. ${s.title}`}>
+							{/* Desktop: an aligned strip of the sequence diagram */}
+							<svg viewBox={`0 0 ${W} ${rowH(s)}`} class="tlx-svg tlx-strip" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+								<defs>
+									{s.n === 1 && (
+										<>
+											<marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+												<path d="M 0 0 L 10 5 L 0 10 z" fill="#000"></path>
+											</marker>
+											<marker id={`${markerId}-new`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+												<path d="M 0 0 L 10 5 L 0 10 z" fill="#4A7C59"></path>
+											</marker>
+										</>
+									)}
+								</defs>
+								{scenario.actors.map((id) => (
+									<line x1={LANE_X[id]} y1={0} x2={LANE_X[id]} y2={rowH(s)} stroke="#ccc" stroke-width="1" stroke-dasharray="2 4" />
+								))}
+								<text x={18} y={rowH(s) / 2 + 4} text-anchor="middle" class="tlx-num" fill={color(s)}>{s.n}</text>
+								{s.kind === 'note' ? (
+									<>
+										<rect
+											x={noteBox(s).x}
+											y={4}
+											width={noteBox(s).w}
+											height={26}
+											fill="#fff"
+											stroke={isNew(s) ? '#4A7C59' : '#777'}
+											stroke-width="1"
+											stroke-dasharray="4 3"
+										/>
+										<text x={noteBox(s).x + noteBox(s).w / 2} y={21} text-anchor="middle" class="tlx-note-label">
+											{s.icon} {s.short}
+										</text>
+									</>
+								) : (
+									<>
+										<line
+											x1={LANE_X[s.from!]}
+											y1={24}
+											x2={LANE_X[s.to!]}
+											y2={24}
+											stroke={color(s)}
+											stroke-width={isNew(s) ? 1.8 : 1.2}
+											marker-end={isNew(s) ? `url(#${markerId}-new)` : `url(#${markerId})`}
+										/>
+										<text x={(LANE_X[s.from!] + LANE_X[s.to!]) / 2} y={13} text-anchor="middle" class="tlx-label" fill={color(s)}>
+											{s.short}
+										</text>
+										{isPaired(s) && (
+											<>
+												<line
+													x1={LANE_X[s.to!]}
+													y1={48}
+													x2={LANE_X[s.from!]}
+													y2={48}
+													stroke={color(s)}
+													stroke-width={isNew(s) ? 1.8 : 1.2}
+													stroke-dasharray="6 4"
+													marker-end={isNew(s) ? `url(#${markerId}-new)` : `url(#${markerId})`}
+												/>
+												<text x={(LANE_X[s.from!] + LANE_X[s.to!]) / 2} y={37} text-anchor="middle" class="tlx-label" fill={color(s)}>
+													{s.response!.short}
+												</text>
+											</>
+										)}
+									</>
+								)}
+								<text x={868} y={rowH(s) / 2 + 4} text-anchor="middle" class="tlx-glyph tlx-glyph-plus" fill="#666">+</text>
+								<text x={868} y={rowH(s) / 2 + 4} text-anchor="middle" class="tlx-glyph tlx-glyph-minus" fill="#666">−</text>
+							</svg>
+
+							{/* Mobile: a compact chip row */}
+							<span class="tlx-chips">
+								<span class="tlx-chips-num">{s.n}</span>
+								<span class="tlx-chips-icons">
+									{s.kind === 'note'
+										? `${s.icon} @ ${s.at!.map((a) => actor(a).icon).join('')}`
+										: isPaired(s)
+											? `${actor(s.from!).icon}⇄${actor(s.to!).icon}`
+											: `${actor(s.from!).icon}→${actor(s.to!).icon}`}
+								</span>
+								<span class="tlx-chips-label">{s.short}</span>
+								{isNew(s) && <span class="tlx-chips-new"></span>}
+							</span>
+						</summary>
+
+						<div class="tlx-body">
+							<p class="tlx-body-head">
+								<strong>{s.title}</strong>
+								<span class="tlx-route">
+									{s.kind === 'note'
+										? `${s.icon} happens at ${s.at!.map((a) => actor(a).label).join(' + ')}`
+										: isPaired(s)
+											? `${actor(s.from!).icon} ${actor(s.from!).label} ⇄ ${actor(s.to!).icon} ${actor(s.to!).label}`
+											: `${actor(s.from!).icon} ${actor(s.from!).label} → ${actor(s.to!).icon} ${actor(s.to!).label}`}
+								</span>
+							</p>
+							<p class="tlx-text" set:html={s.summary} />
+							{payloadBlocks(s).map((b) => (
+								<div class={`tlx-payload${b.dir === 'res' ? ' tlx-payload-res' : ''}`}>
+									<div class="tlx-payload-label">
+										{dirText(s, b.dir) && <span class="tlx-dir">{dirText(s, b.dir)}</span>}
+										{b.label}
+									</div>
+									<pre><code set:html={highlight(b.body)} /></pre>
+								</div>
+							))}
+							{(s.news?.length || s.specHref) && (
+								<p class="tlx-links">
+									{s.news?.map((n) => (
+										<a href={n.href} class="tlx-badge" target="_blank" rel="noopener noreferrer">{n.label}</a>
+									))}
+									{s.specHref && <a href={s.specHref} class="tlx-spec" target="_blank" rel="noopener noreferrer">{s.specLabel ?? 'Spec'} ↗</a>}
+								</p>
+							)}
+						</div>
+					</details>
+				))}
+		</>
+	))}
+</div>
+
+<script>
+	document.querySelectorAll<HTMLElement>('[data-tlx]').forEach((root) => {
+		const btn = root.querySelector<HTMLButtonElement>('.tlx-toggle-all');
+		if (!btn) return;
+		btn.addEventListener('click', () => {
+			const open = btn.dataset.state !== 'open';
+			root.querySelectorAll<HTMLDetailsElement>('details.tlx-row').forEach((d) => {
+				d.open = open;
+			});
+			btn.dataset.state = open ? 'open' : 'closed';
+			btn.textContent = open ? 'collapse all' : 'expand all';
+		});
+	});
+</script>
+
+<style>
+	.tlx {
+		border: 1px solid var(--border-color);
+		margin: 1rem 0 1.5rem 0;
+	}
+
+	.tlx-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.35rem 0.6rem;
+		border-bottom: 1px solid var(--border-color);
+		background: var(--table-header-bg);
+		flex-wrap: wrap;
+	}
+
+	.tlx-legend {
+		font-size: 0.78rem;
+		color: #444;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	.tlx-key {
+		display: inline-block;
+		width: 20px;
+		height: 0;
+		border-top: 2px solid;
+	}
+
+	.tlx-key-new {
+		border-color: var(--button-green);
+	}
+
+	.tlx-key-res {
+		border-top: 2px dashed #000;
+		margin-left: 0.7rem;
+	}
+
+	.tlx-key-note {
+		width: 16px;
+		height: 10px;
+		border: 1px dashed #777;
+		margin-left: 0.7rem;
+	}
+
+	.tlx-toggle-all {
+		font-family: inherit;
+		font-size: 0.75rem;
+		background: #fff;
+		border: 1px solid var(--border-color);
+		padding: 0.1rem 0.45rem;
+		cursor: pointer;
+	}
+
+	.tlx-toggle-all:hover {
+		background: #eee;
+	}
+
+	.tlx-head {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		background: var(--bg-color);
+		border-bottom: 1px solid var(--border-color);
+	}
+
+	.tlx-svg {
+		display: block;
+		width: 100%;
+		height: auto;
+		font-family: 'Univers', Helvetica, Arial, sans-serif;
+	}
+
+	.tlx-actor {
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.tlx-actor-sub {
+		font-size: 9.5px;
+		fill: #666;
+	}
+
+	.tlx-act {
+		background: #f5f5f5;
+		border-top: 1px solid #ddd;
+		border-bottom: 1px solid #ddd;
+		padding: 0.3rem 0.6rem;
+		font-size: 0.85rem;
+	}
+
+	.tlx-act-title {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		margin-right: 0.5rem;
+	}
+
+	.tlx-act-intro {
+		color: #444;
+		font-size: 0.82rem;
+	}
+
+	.tlx-row {
+		border-bottom: 1px solid #eee;
+	}
+
+	.tlx-row:last-child {
+		border-bottom: none;
+	}
+
+	.tlx-summary {
+		display: block;
+		cursor: pointer;
+		list-style: none;
+	}
+
+	.tlx-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.tlx-summary:hover {
+		background: #f5f5f5;
+	}
+
+	.tlx-row[open] {
+		background: #fcfcfc;
+	}
+
+	.tlx-row[open] > .tlx-summary {
+		background: #f0f0f0;
+	}
+
+	.tlx-num {
+		font-size: 9.5px;
+	}
+
+	.tlx-label {
+		font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+		font-size: 10px;
+	}
+
+	.tlx-note-label {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-size: 11px;
+		fill: #333;
+	}
+
+	.tlx-glyph {
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.tlx-row[open] .tlx-glyph-plus {
+		display: none;
+	}
+
+	.tlx-row:not([open]) .tlx-glyph-minus {
+		display: none;
+	}
+
+	/* Expanded detail */
+	.tlx-body {
+		padding: 0.3rem 0.9rem 0.9rem 0.9rem;
+		border-top: 1px dashed #ccc;
+	}
+
+	.tlx-body-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		margin: 0.5rem 0 0 0;
+		font-size: 1rem;
+	}
+
+	.tlx-route {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-size: 0.78rem;
+		color: #555;
+	}
+
+	.tlx-text {
+		margin: 0.4rem 0;
+		font-size: 0.95rem;
+		max-width: 46rem;
+	}
+
+	.tlx-payload {
+		border: 1px solid var(--border-color);
+		margin: 0.6rem 0;
+		max-width: 46rem;
+	}
+
+	.tlx-payload-res {
+		border-style: dashed;
+	}
+
+	.tlx-payload-label {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-size: 0.75rem;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		background: var(--table-header-bg);
+		border-bottom: 1px solid var(--border-color);
+		padding: 0.15rem 0.5rem;
+	}
+
+	.tlx-payload-res .tlx-payload-label {
+		border-bottom-style: dashed;
+	}
+
+	.tlx-dir {
+		font-weight: 700;
+		margin-right: 0.5rem;
+	}
+
+	.tlx-payload pre {
+		margin: 0;
+		border: none;
+		font-size: 0.78rem;
+		line-height: 1.5;
+	}
+
+	/* Syntax highlighting for payload blocks */
+	.tlx-payload :global(.tk-key),
+	.tlx-payload :global(.tk-header) {
+		color: #0550ae;
+	}
+
+	.tlx-payload :global(.tk-str) {
+		color: #a15c00;
+	}
+
+	.tlx-payload :global(.tk-num),
+	.tlx-payload :global(.tk-bool) {
+		color: #8250df;
+	}
+
+	.tlx-payload :global(.tk-method) {
+		color: #cf222e;
+		font-weight: 700;
+	}
+
+	.tlx-payload :global(.tk-proto) {
+		color: #6e7781;
+	}
+
+	.tlx-payload :global(.tk-comment) {
+		color: #6e7781;
+		font-style: italic;
+	}
+
+	.tlx-links {
+		margin: 0.5rem 0 0 0;
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		align-items: center;
+	}
+
+	.tlx-badge {
+		background: var(--button-green);
+		color: #fff !important;
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-size: 0.75rem;
+		padding: 0.1rem 0.4rem;
+		text-decoration: none;
+	}
+
+	.tlx-badge:hover {
+		background: var(--button-green-hover);
+		text-decoration: none;
+	}
+
+	.tlx-spec {
+		font-size: 0.8rem;
+	}
+
+	/* Mobile fallback: chips instead of lane-aligned strips */
+	.tlx-chips {
+		display: none;
+	}
+
+	@media (max-width: 720px) {
+		.tlx-head,
+		.tlx-strip {
+			display: none;
+		}
+
+		.tlx-chips {
+			display: flex;
+			align-items: baseline;
+			gap: 0.5rem;
+			padding: 0.4rem 0.6rem;
+		}
+
+		.tlx-chips::before {
+			content: '+';
+			font-weight: 700;
+			width: 0.7rem;
+			flex-shrink: 0;
+		}
+
+		.tlx-row[open] .tlx-chips::before {
+			content: '−';
+		}
+
+		.tlx-chips-num {
+			font-family: 'SF Mono', Monaco, Consolas, monospace;
+			font-size: 0.72rem;
+			color: #666;
+			min-width: 1.1rem;
+			text-align: right;
+			flex-shrink: 0;
+		}
+
+		.tlx-chips-icons {
+			flex-shrink: 0;
+			font-size: 0.8rem;
+		}
+
+		.tlx-chips-label {
+			font-family: 'SF Mono', Monaco, Consolas, monospace;
+			font-size: 0.78rem;
+			min-width: 0;
+		}
+
+		.tlx-row[data-new] .tlx-chips-label {
+			color: var(--button-green);
+			font-weight: 700;
+		}
+
+		.tlx-chips-new {
+			flex-shrink: 0;
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+			background: var(--button-green);
+			align-self: center;
+		}
+
+		.tlx-body {
+			padding: 0.3rem 0.6rem 0.7rem 0.6rem;
+		}
+	}
+</style>

@@ -1,0 +1,164 @@
+---
+// The same protocol moments under 2025-11-25 and under the 2026-07-28 draft,
+// side by side. A comparison reads better as two columns than as a toggle.
+
+interface Moment {
+	label: string;
+	then: string; // HTML
+	now: string; // HTML
+}
+
+const MOMENTS: Moment[] = [
+	{
+		label: 'Starting to talk to a server',
+		then: `Send <code>initialize</code>, negotiate a version and capabilities,
+			send <code>notifications/initialized</code>, and hold on to the
+			<code>Mcp-Session-Id</code> the server may assign. Every later request
+			must carry that session header or get rejected.`,
+		now: `Just send the request. Version, identity, and capabilities travel in
+			<code>_meta</code> on every message. Sessions no longer exist. Clients
+			that want to check versions up front may call
+			<code>server/discover</code>, which every server must implement.`,
+	},
+	{
+		label: 'The server needs something from the client',
+		then: `The server sends its own JSON-RPC request
+			(<code>elicitation/create</code>, <code>sampling/createMessage</code>,
+			<code>roots/list</code>) back over an SSE stream, and the client answers
+			on a separate POST. This requires a live stream to the right server
+			instance at the right moment.`,
+		now: `The server ends the request with
+			<code>resultType: "input_required"</code>, listing what it needs as data
+			and packing its own memory into <code>requestState</code>. The client
+			retries the original request with <code>inputResponses</code>. Any
+			replica can handle the retry.`,
+	},
+	{
+		label: 'Getting a client_id',
+		then: `Dynamic Client Registration: POST to the auth server's
+			<code>/register</code> endpoint and receive fresh credentials. Every new
+			authorization server means another registration, and another set of
+			credentials to manage.`,
+		now: `The <code>client_id</code> is an HTTPS URL pointing at a metadata
+			document the client hosts about itself. The auth server fetches and
+			validates it on demand. Nothing to register, and the identity is
+			portable across authorization servers. DCR is deprecated.`,
+	},
+	{
+		label: 'Server-pushed updates',
+		then: `Open a standalone HTTP GET stream to the server. Unsolicited
+			server messages can arrive on it at any time, and resource update
+			subscriptions are managed with <code>resources/subscribe</code> and
+			<code>resources/unsubscribe</code>.`,
+		now: `The GET endpoint is gone. Clients that want change notifications
+			POST a <code>subscriptions/listen</code> request naming exactly the
+			notification types they opt in to, and the server tags everything it
+			sends with a subscription id.`,
+	},
+	{
+		label: 'A dropped SSE stream',
+		then: `Reconnect with <code>Last-Event-ID</code> and the server replays
+			the events you missed. Servers have to buffer messages per stream to
+			support redelivery.`,
+		now: `The in-flight request is lost, and that is fine by design: the
+			client re-issues it as a new request with a new id. One more reason
+			every request has to be self-contained.`,
+	},
+	{
+		label: 'Learning a URL elicitation finished',
+		then: `URL mode requests carry an <code>elicitationId</code>, and when the
+			out-of-band browser flow completes, the server pushes a
+			<code>notifications/elicitation/complete</code> message referencing that
+			id over an open stream.`,
+		now: `Both the notification and the id are gone. The client retries the
+			original request with the echoed <code>requestState</code>, and the
+			server checks its own records to see whether the browser flow finished.
+			A too-early retry just gets another <code>input_required</code>.`,
+	},
+	{
+		label: 'Long-running work',
+		then: `Experimental tasks live in the core spec. Clients opt in per
+			request, retrieve results through a blocking <code>tasks/result</code>
+			call, and can enumerate tasks with <code>tasks/list</code>.`,
+		now: `Tasks are an official extension
+			(<code>io.modelcontextprotocol/tasks</code>). Servers may return task
+			handles unsolicited to capable clients, results come from polling
+			<code>tasks/get</code>, and mid-flight input flows through
+			<code>tasks/update</code>.`,
+	},
+];
+---
+
+<div class="tn-scroll">
+	<table class="tn-table">
+		<thead>
+			<tr>
+				<th class="tn-h-moment">Moment</th>
+				<th class="tn-h-then">2025‑11‑25 <span class="tn-h-sub">current</span></th>
+				<th class="tn-h-now">2026‑07‑28 <span class="tn-h-sub">draft</span></th>
+			</tr>
+		</thead>
+		<tbody>
+			{MOMENTS.map((m) => (
+				<tr>
+					<th scope="row" class="tn-moment">{m.label}</th>
+					<td class="tn-then" set:html={m.then} />
+					<td class="tn-now" set:html={m.now} />
+				</tr>
+			))}
+		</tbody>
+	</table>
+</div>
+
+<style>
+	.tn-scroll {
+		overflow-x: auto;
+		margin: 2rem 0;
+	}
+
+	.tn-table {
+		margin: 0;
+		min-width: 640px;
+	}
+
+	.tn-table th,
+	.tn-table td {
+		vertical-align: top;
+		padding: 0.4rem 0.55rem;
+		font-size: 0.9rem;
+		line-height: 1.5;
+	}
+
+	.tn-h-sub {
+		display: block;
+		font-weight: 400;
+		font-size: 0.75rem;
+		color: #666;
+	}
+
+	.tn-h-now {
+		color: var(--button-green);
+	}
+
+	.tn-moment {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 0.8rem;
+		width: 12rem;
+		background-color: var(--table-header-bg);
+	}
+
+	.tn-now {
+		border-left: 3px solid var(--button-green);
+	}
+
+	.tn-then {
+		color: #555;
+	}
+
+	.tn-table :global(code) {
+		font-size: 0.82em;
+		word-break: break-word;
+	}
+</style>

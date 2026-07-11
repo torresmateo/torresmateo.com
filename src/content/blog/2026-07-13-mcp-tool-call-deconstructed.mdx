@@ -1,0 +1,320 @@
+---
+title: "An MCP Tool Call, Deconstructed"
+description: "Three prompts, three storylines. An interactive tour of the biggest MCP release yet."
+pubDate: 2026-07-13
+categories: ["deconstructed"]
+tags: ["mcp", "aaif", "agents"]
+---
+import ScenarioExplorer from '../../components/deconstructed/mcp-tool-call/ScenarioExplorer.astro';
+import Timeline from '../../components/deconstructed/mcp-tool-call/Timeline.astro';
+import StateMap from '../../components/deconstructed/mcp-tool-call/StateMap.astro';
+import ThenNow from '../../components/deconstructed/mcp-tool-call/ThenNow.astro';
+import DecisionFlow from '../../components/deconstructed/mcp-tool-call/DecisionFlow.astro';
+
+Last month I joined the first cohort of [ambassadors](https://aaif.io/ambassadors/)
+for the
+[Agentic AI Foundation](https://aaif.io), the Linux Foundation home of
+[MCP](https://modelcontextprotocol.io), [goose](https://block.github.io/goose/),
+[agentgateway](https://agentgateway.dev/),
+and [AGENTS.md](https://agents.md). Ambassadors commit to one public
+contribution per month, and I want mine to be the thing I find most useful
+when I read protocol specs: explanations where you can *see* the machinery
+move. So this post is the first of several "deconstructions" of agentic processes.
+
+<figure style="margin: 2rem 0;">
+	<img
+		src="/images/blog/mcp-tool-call-deconstructed/mateo-ambassador-map.png"
+		alt="The AAIF ambassador map: 140 ambassadors across 41 countries, with the Brazil pin open and labeled 'Brazil (1), Mateo Torres'."
+		loading="lazy"
+	/>
+	<figcaption style="font-size: 0.8rem; color: #555; margin-top: 0.4rem; text-align: center;">
+		140 ambassadors, 41 countries, and exactly one pin over Brazil. Hi.
+	</figcaption>
+</figure>
+
+Full disclosure before we start: I work at
+[Arcade](https://www.arcade.dev/?utm_source=mateo_blog&utm_medium=mateo_blog&utm_campaign=mcp-tool-call-deconstructed),
+where I spend my days on MCP infrastructure and navigating the idiosyncrasies of 
+the different MCP clients and harnesses and how they impact real-world agentic
+work. That makes me biased *and* it
+makes me the kind of person who reads specs and SEPs for fun. I'll let
+you decide how those cancel out.
+
+The first subject is super obvious. MCP is about to ship its next release, and
+the [draft revision](https://modelcontextprotocol.io/specification/draft),
+dated `2026-07-28`, is the most impactful rewrite the protocol has had since it
+appeared. While it's listed second in the key changes, the core change is that
+MCP is now *stateless*. The `initialize` handshake is
+gone. Sessions are gone. Servers no longer send requests to clients.
+Every one of those sentences changes the shape and lifecycle of a tool call, so
+I think the best way
+to understand the release is to follow real calls through the whole stack and
+watch what happens under the hood.
+
+The dissection below has five timelines. Two of them are setup, and they run
+rarely: the day you add a server to your harness, and the moment a chat conversation
+starts (yes, a session, as it's tradition to overload the same words in every layer
+of the agentic stack 🥲). The other three are storylines, and they run on every prompt. I picked three
+because "a tool call" behaves very differently depending on who has to
+prove what to whom: a tool with no auth at all, a tool guarded by OAuth
+between the client and the server, and a tool where the *server* needs your
+permission to reach a third service. These are just three of many shapes a
+call can take, but they cover the auth boundaries you'll hit most often.
+
+I'm aware that mermaid diagrams are not for everyone, so I made these ones 
+interactive, you can expand each event to see what happens at that point.
+For those used to the current version of the protocol, you only need to open 
+the green events, which represent a new or changed part of the protocol.
+
+## The cast
+
+Six pieces of software and one human appear in these stories, and the
+spec is picky about their names. The picky distinctions really matter,
+so here they are up front. Note that they don't always appear in every storyline.
+
+- **You.** The human. You appear more often than you might expect.
+- **The harness.** The spec calls this the *host*: the application you
+actually use, whether that's Claude Code in a terminal, an IDE, or a chat
+app. It owns the conversation, decides what the model sees, and enforces
+consent. I'll use harness throughout because that's the word everyone uses.
+- **The model.** The LLM behind an inference API. Importantly:
+*the model never speaks MCP*. It emits a structured "I want to call this
+tool" block in the provider's format, and that is the end of its
+involvement.
+- **The MCP client.** A component *inside* the harness that manages the 
+relationship to the MCP server. It speaks the protocol, holds the tokens, and
+does the retrying. When people say "the client is the app", they're
+flattening a boundary deliberately established in the spec.
+- **The MCP server.** The thing with the tools. The one in this blog post is fictional: Pinehill
+Cabins, which rents cabins to teams and exposes `check_availability` and
+`book_cabin` at `https://cabins.example.com/mcp`.
+- **The authorization server.** The OAuth 2.1 service that issues tokens for
+Pinehill. It is a separate role from the MCP server, even if one company
+operates both. Appears in the first-contact timeline, then hides behind a
+refresh token forever (or until the refresh token expires).
+- **CalConnect.** A fictional third-party calendar service that Pinehill's
+server integrates with. Appears in what is in my opinion the most interesting
+storyline, where it triggers one of the most interesting dances in the whole
+release.
+
+## The rules of this dissection
+
+A note before you start clicking, so you know what I simplified on
+purpose:
+
+- **Tools only.** MCP also has resources, prompts, subscriptions, and extensions
+that ship interactive UI into conversations, handle other OAuth flows, or long 
+running tasks (with more being actively worked on). Each of those
+deserve their own post. But not today.
+- **Setup runs once, storylines run per prompt.** The two setup timelines
+cover meeting a server and starting a session. The three storylines assume
+that work already happened, which is exactly how it happens in practice. 
+Nuanced scenarios such as caching server information and/or reconnecting
+are not part of the storylines. (Tell me if you'd like me to cover them!)
+- **Remote servers over Streamable HTTP only.** I don't cover local MCP servers
+(the ones your harness launches as a subprocess and talks to over stdio). Every
+storyline here is a remote server reached over the Streamable HTTP transport,
+which is where the OAuth and cross-service machinery matters. 
+- **One registration mechanism.** The spec offers three ways for a client to
+get a `client_id`: pre-registered credentials, Client ID Metadata
+Documents, and Dynamic Client Registration, which is now deprecated. I
+show only CIMD, because it is the recommended path when a client and a
+server have no prior relationship, and that is the normal case in MCP.
+- **Payloads are real, names are fake.** Every message follows the
+[2026-07-28 draft](https://modelcontextprotocol.io/specification/draft);
+Pinehill and CalConnect do not exist (AFAIK, if you work at Pinehill or
+CalConnect and you're mad, let me know and also... WTF??).
+
+## First contact: the day you add the server
+
+Every relationship in these stories starts the same way: you paste one URL
+into your harness. Everything else gets discovered from it, and the
+discovery chain is where this release flexes its OAuth muscles. The pieces
+are standard building blocks: protected resource metadata
+to find the authorization server, PKCE and resource indicators to protect
+the exchange, the new `iss` check to know who is answering, and Client ID
+Metadata Documents so that registration becomes publishing a JSON file
+instead of filling a form on someone else's server.
+
+Two things to watch for in this timeline. First, `server/discover`, a new member
+of the protocol introduced in this draft: every server
+must implement it, and it doubles as a compatibility probe for older
+servers. Second, notice what the client does when it wants to authenticate:
+it fetches metadata documents and opens your browser. Nothing here is
+required to happen at add-time; a client may lazily wait for its first 401,
+which points at the same metadata. Harnesses front-load it because a sign-in
+dialog is friendlier the day you add a server than in the middle of a task.
+Also notice the model has no lane here. Setup is none of its business.
+
+<Timeline scenario="meet" />
+
+## Session start: assembling the context
+
+The other thing that happens before any prompt is quieter. When the harness
+boots a session, it reads its MCP config (a file no spec governs), refreshes
+what it knows about each server's tools, and builds the context the model
+will wake up in. This timeline is short, and its last step is my favorite
+row in the whole post: the exact moment MCP hands off to the model API,
+where tool schemas stop being protocol and become prompt.
+
+<Timeline scenario="context" />
+
+That `ttlMs` stamp on the tool list is what powers everything below: for the
+next hour, the harness knows the tools without asking. With the server met,
+the token stored, and the schemas cached, we can finally type something.
+
+## The two tools, and how the server answers
+
+Before we type that something, meet the two tools Pinehill exposes. The whole  
+post lives in how they behave:
+
+- **`check_availability(checkIn, checkOut)`** is a read-only lookup. No auth, no
+side effects, an answer the server can produce on the spot.
+- **`book_cabin(property, checkIn, checkOut, paymentMethod, calendar?)`** is a
+mutation. It needs things from *you* (confirm the charge, complete a payment,
+connect the calendar named by the optional `calendar` parameter), and it needs
+time from *the server itself* (a property manager has to approve a group
+booking before it is real).
+
+For this post, I wanted to ensure we hit some interesting use cases for a tool
+call, and that largely comes down to two questions the server asks about the call.
+
+The first question is **what the result should say**, and it has three answers.
+If the server is waiting on *you*, it returns `resultType: "input_required"`.
+If the server itself needs time, with nothing more from you, it returns
+`resultType: "task"`. And if the answer is ready now, it returns
+`resultType: "complete"`.
+
+The second question is **how to deliver that answer**, and it is orthogonal to
+the first. A response travels either as a single `application/json` object or as
+a `text/event-stream` meant to push progress notifications before the final
+result. A server reaches for the stream only when it has progress worth showing.
+
+Here is the whole decision:
+
+<DecisionFlow />
+
+Trace a call through all the branches and you have already read the three storylines.
+`check_availability` is a pure lookup, so it comes straight back as a complete
+result (plain JSON, in storyline A). `book_cabin` stops to make you confirm and
+pay (using `input_required`); it streams progress while it checks availability
+(a good use case for `text/event-stream`); and its property-manager approval is
+the server's own wait (perfect for a `task`).
+
+## Pick a storyline
+
+The timeline reads like a sequence
+diagram, and it stays one while you dig: click any row and it unfolds right
+where it happens, with the messages that actually crossed the wire.
+Solid arrows are requests; dashed
+arrows are the responses coming back, so a request and its reply share one
+row. Dashed boxes are the moments <em>between</em>
+messages, the parts no protocol specifies (a cache lookup, a consent dialog,
+a human at the other company), and their icons tell you which component
+they happen in. The lane header sticks to the top of the screen so you never
+lose track of who is who, and the green badges link out to the specific spec
+section or pull request behind each change.
+
+<ScenarioExplorer />
+
+## What the three storylines teach
+
+**Storyline A is the whole protocol in two messages.** A stateless request
+carrying its own identity, and a response. No handshake, no session, no
+`Authorization` header, and the server answered with plain JSON because
+nothing about a fast lookup needs a stream. When people say the draft made
+MCP radically simpler to serve, this is what they mean: that request is
+servable by a plain HTTP function with no memory.
+
+**Storyline B holds the two patterns that define the release.** The token
+from first contact rides along silently; what makes this storyline
+interesting is what happens when the server needs a human. The first pattern
+is the Multi Round-Trip Request, where the server asks for your confirmation
+by *ending* the call with `resultType: "input_required"` and an encrypted
+`requestState` it hands to the client for safekeeping. The second is the
+tasks extension, where a slow booking becomes a durable handle the client
+polls while a property manager finishes their coffee. Both exist for the
+same reason: no server instance should have to remember your half-finished
+work, and no connection should have to stay open for a human's attention
+span.
+
+**Storyline C is permission by proxy, and it's the one I'd study if you
+build servers.** Pinehill needs access to your CalConnect calendar. It must
+not ask for your CalConnect credentials through a form (the spec forbids
+collecting secrets in form mode), and it must not borrow the MCP client's
+token (token passthrough is forbidden too). The answer is URL mode
+elicitation: the server hands the client a URL, the client shows it to you
+in full and opens it in a real browser only after you consent, and a
+complete OAuth flow runs between your browser, Pinehill, and CalConnect
+without the MCP client seeing anything but that URL. The resulting tokens
+live server-side, bound to your identity, after Pinehill verifies that the
+person in the browser is the person who triggered the elicitation. That last
+check defeats a phishing attack where someone tricks you into completing an
+authorization that lands in *their* session. URL mode itself shipped in
+`2025-11-25`; what the draft changed is the plumbing around it. There is no
+`elicitationId` and no completion notification anymore. The client just
+retries the call, and the server checks whether the browser flow finished.
+
+There were _a lot_ of messages going back and forth in the diagrams above. 
+However, from the point of view of the conversation, they're all a _single_ 
+tool call. A well-designed harness should keep the context clean and free from
+the implementation details related to the lifecycle of the tool call. And _yes_,
+I did purposefully keep the happy path only in the storylines above. Agentic
+error handling is slightly more nuanced when it comes to elevating errors to the
+LLM, which often has enough context to automatically retry and heal the flow.
+In our example, the form elicitation may have been managed through a couple of
+extra messages between you and the model.
+
+## Where did all the state go?
+
+"Stateless protocol" is an easy phrase to say and a hard one to mean. The
+storylines clearly *have* state: tokens on both sides, a half-confirmed
+reservation, a task. Statelessness never deletes state, it relocates it so the
+infrastructure can be scaled more conveniently when serving a large number of
+requests. This figure is the same material indexed by *where things live*
+instead of *when things happen*. The middle column is the draft's cleverest
+trick, and the right column explains why servers just got easier to scale.
+
+<StateMap />
+
+## The same moments, one release apart
+
+Everything above described the draft. If you're running an MCP client or
+server today, you're living in `2025-11-25`, and the distance between the two
+is best felt by flipping between them. Seven moments, two protocols.
+
+<ThenNow />
+
+The changelog also retires things these stories never needed: `ping` is
+gone, log verbosity moved into a per-request `_meta` field, and the Roots,
+Sampling, and Logging features will be deprecated with a twelve-month window.
+The [full changelog](https://modelcontextprotocol.io/specification/draft/changelog)
+is worth your time.
+
+## What this release is really about
+
+Deconstructing the calls makes the theme visible: this release moves MCP
+onto the patterns that already made the web scale. Stateless requests that
+are easy to serve from any replica. Cache lifetimes on cacheable responses.
+Routing metadata in headers. Identity you host at a URL. Trace context that
+crosses service boundaries. Every green arrow in the diagrams is MCP trading
+a bespoke mechanism for a "boring" (proven to work) one.
+
+There's a cost, and it lands on client developers: the client now holds the
+tokens, the caches, the task handles, and the retry logic that servers used
+to carry in their sessions. Servers got radically simpler to operate. Clients
+got a decent amount of homework. Given that there are maybe a few dozen serious
+harnesses and many thousands of servers, I think the protocol picked the right
+side of that trade. Having said that, I'm not optimistic about a frictionless
+transition.
+
+If you maintain a server: your migration is mostly deletion. Drop the
+handshake, drop the session store, return `resultType`, stamp your list
+results with `ttlMs`, and rethink any flow where you called `elicitation/create`
+as a request. If you maintain a client: start with MRTR, because when servers
+adopt the draft, elicitation as you know it stops arriving.
+
+Also, this is my first technical deep dive about MCP, so if you liked it and want
+to talk about it or request another deconstruction (or if you hated it and want
+to point out my mistakes), please [reach out to me!](https://x.com/torresmateo)
+
