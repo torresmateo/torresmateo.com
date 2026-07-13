@@ -1,0 +1,352 @@
+---
+// "Where the state went": an inventory of every piece of state in the story,
+// grouped by where it physically lives under the 2026-07-28 stateless model.
+
+interface Item {
+	name: string;
+	isNew?: boolean;
+	note: string; // HTML
+}
+
+interface Zone {
+	title: string;
+	subtitle: string;
+	items: Item[];
+}
+
+const ZONES: Zone[] = [
+	{
+		title: 'The harness’s machine',
+		subtitle: 'host + MCP client',
+		items: [
+			{
+				name: 'Conversation history',
+				note: `Never leaves the host. Servers only ever see the arguments of the
+					calls addressed to them. This is a stated design principle of the
+					protocol: servers should not be able to read the whole conversation,
+					or see into other servers.`,
+			},
+			{
+				name: 'Consent decisions',
+				note: `Which tools you approved, and under what conditions. The spec
+					assigns this responsibility to the host, and it never crosses the
+					wire.`,
+			},
+			{
+				name: 'Token store, keyed by issuer',
+				isNew: true,
+				note: `Access and refresh tokens live here, confidential in transit and
+					at rest. The draft makes the binding explicit: credentials are keyed
+					by the authorization server's <code>issuer</code> identifier, and
+					reusing them against a different issuer is forbidden.`,
+			},
+			{
+				name: 'tools/list cache',
+				isNew: true,
+				note: `List results now carry <code>ttlMs</code> and
+					<code>cacheScope</code>, so the client can serve schemas from cache
+					instead of re-fetching on every turn. The fetch happens once at
+					session start; none of the three storylines touch the network for
+					schemas because of this.`,
+			},
+			{
+				name: 'PKCE verifier + expected issuer',
+				note: `Short-lived, one per authorization attempt. The recorded issuer
+					is what makes the <code>iss</code> check in the first-contact
+					timeline meaningful: the comparison only protects you if the
+					expected value came from validated metadata.`,
+			},
+			{
+				name: 'Task IDs',
+				note: `Durable handles for long-running work. They survive crashes and
+					reconnects; the harness can resume polling with the same id after a
+					restart.`,
+			},
+		],
+	},
+	{
+		title: 'The wire',
+		subtitle: 'carried inside requests',
+		items: [
+			{
+				name: 'requestState blob',
+				isNew: true,
+				note: `The server's memory of a half-finished request, encrypted by the
+					server and for the server, carried by the client, echoed back
+					verbatim on retry. Clients must not inspect or modify it. Servers
+					must treat it as attacker-controlled input and protect its integrity
+					with an HMAC or AEAD. This is the trick that lets the server forget
+					everything between the interim result and the retry in storyline
+					B.`,
+			},
+			{
+				name: '_meta identity block',
+				isNew: true,
+				note: `Protocol version, client info, and client capabilities travel on
+					every single request. This block is what replaced the
+					<code>initialize</code> handshake: the negotiation that used to
+					happen once per session now happens implicitly on each message.`,
+			},
+			{
+				name: 'Mirrored headers',
+				isNew: true,
+				note: `<code>Mcp-Method</code> and <code>Mcp-Name</code> repeat body
+					fields at the HTTP layer so load balancers and gateways can route
+					and rate-limit without parsing JSON. Servers must reject requests
+					where header and body disagree.`,
+			},
+			{
+				name: 'Trace context',
+				isNew: true,
+				note: `<code>traceparent</code>, <code>tracestate</code>, and
+					<code>baggage</code> ride in <code>_meta</code> following the
+					OpenTelemetry conventions, so a single distributed trace can span
+					the harness, the MCP server, and whatever sits behind it.`,
+			},
+		],
+	},
+	{
+		title: 'The server',
+		subtitle: 'Pinehill’s side',
+		items: [
+			{
+				name: 'Per-connection state',
+				isNew: true,
+				note: `None. This cell is the headline of the release. There are no
+					sessions to store, no handshake to remember, no
+					<code>Mcp-Session-Id</code> to route on. Any replica behind the load
+					balancer can answer any request, including the retry of a request a
+					different replica saw first.`,
+			},
+			{
+				name: 'Task store',
+				note: `A deliberate exception to statelessness. Tasks are durable
+					records addressed by <code>taskId</code>, kept until their
+					<code>ttlMs</code> lapses, and designed to be shared storage so any
+					replica can answer a poll.`,
+			},
+			{
+				name: 'Third-party tokens',
+				note: `Storyline C's CalConnect grant lives here, bound to your
+					Pinehill identity, obtained through your browser and never through
+					the MCP client. The spec is absolute about this boundary: downstream
+					credentials must not transit the client, and the server must never
+					reuse the client's own token downstream (that would be token
+					passthrough, which is forbidden).`,
+			},
+			{
+				name: 'Your conversation',
+				note: `Not here. The server saw a handful of booking arguments, your
+					elicitation answers, and an encrypted blob it minted itself.
+					Everything else in the story stayed on your machine.`,
+			},
+		],
+	},
+];
+---
+
+<div class="sm-wrap" data-sm>
+	<div class="sm-toolbar">
+		<span class="sm-legend">
+			<span class="sm-dot"></span> new or changed in 2026‑07‑28
+		</span>
+		<button type="button" class="sm-toggle-all" data-state="closed">expand all</button>
+	</div>
+	<div class="sm-grid">
+		{ZONES.map((zone) => (
+			<section class="sm-zone">
+				<header class="sm-zone-head">
+					<span class="sm-zone-title">{zone.title}</span>
+					<span class="sm-zone-sub">{zone.subtitle}</span>
+				</header>
+				{zone.items.map((item) => (
+					<details class="sm-item">
+						<summary class="sm-item-name">
+							{item.isNew && <span class="sm-dot" title="New or changed in 2026-07-28"></span>}
+							<span class="sm-item-text">{item.name}</span>
+							<span class="sm-glyph sm-glyph-plus">+</span>
+							<span class="sm-glyph sm-glyph-minus">−</span>
+						</summary>
+						<p class="sm-note" set:html={item.note} />
+					</details>
+				))}
+			</section>
+		))}
+	</div>
+	<p class="sm-caption">
+		<span class="sm-dot"></span> marks state whose location or rules changed in the
+		2026‑07‑28 draft. Click any item to see what it does. Notice the server column.
+	</p>
+</div>
+
+<script>
+	document.querySelectorAll<HTMLElement>('[data-sm]').forEach((root) => {
+		const btn = root.querySelector<HTMLButtonElement>('.sm-toggle-all');
+		if (!btn) return;
+		btn.addEventListener('click', () => {
+			const open = btn.dataset.state !== 'open';
+			root.querySelectorAll<HTMLDetailsElement>('details.sm-item').forEach((d) => {
+				d.open = open;
+			});
+			btn.dataset.state = open ? 'open' : 'closed';
+			btn.textContent = open ? 'collapse all' : 'expand all';
+		});
+	});
+</script>
+
+<style>
+	.sm-wrap {
+		margin: 2rem 0;
+		border: 1px solid var(--border-color);
+	}
+
+	.sm-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.35rem 0.6rem;
+		border-bottom: 1px solid var(--border-color);
+		background: var(--table-header-bg);
+		flex-wrap: wrap;
+	}
+
+	.sm-legend {
+		font-size: 0.78rem;
+		color: #444;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.sm-toggle-all {
+		font-family: inherit;
+		font-size: 0.75rem;
+		background: #fff;
+		border: 1px solid var(--border-color);
+		padding: 0.1rem 0.45rem;
+		cursor: pointer;
+	}
+
+	.sm-toggle-all:hover {
+		background: #eee;
+	}
+
+	.sm-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr 1fr;
+		gap: 0.75rem;
+		padding: 0.75rem;
+	}
+
+	.sm-zone {
+		border: 1px solid var(--border-color);
+	}
+
+	.sm-zone-head {
+		display: flex;
+		flex-direction: column;
+		background: var(--table-header-bg);
+		border-bottom: 1px solid var(--border-color);
+		padding: 0.35rem 0.55rem;
+	}
+
+	.sm-zone-title {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 0.85rem;
+	}
+
+	.sm-zone-sub {
+		font-size: 0.75rem;
+		color: #666;
+	}
+
+	.sm-item {
+		border-bottom: 1px solid #ddd;
+	}
+
+	.sm-item:last-child {
+		border-bottom: none;
+	}
+
+	.sm-item-name {
+		padding: 0.35rem 0.55rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+		font-weight: 700;
+		list-style: none;
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.sm-item-name::-webkit-details-marker {
+		display: none;
+	}
+
+	.sm-item-text {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.sm-glyph {
+		font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+		font-size: 0.95rem;
+		font-weight: 700;
+		color: #666;
+		flex-shrink: 0;
+	}
+
+	.sm-item[open] .sm-glyph-plus {
+		display: none;
+	}
+
+	.sm-item:not([open]) .sm-glyph-minus {
+		display: none;
+	}
+
+	.sm-item-name:hover {
+		background: #f5f5f5;
+	}
+
+	.sm-item[open] {
+		background: #fcfcfc;
+	}
+
+	.sm-dot {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--button-green);
+		flex-shrink: 0;
+	}
+
+	.sm-note {
+		margin: 0;
+		padding: 0 0.55rem 0.55rem 0.55rem;
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: #333;
+	}
+
+	.sm-caption {
+		font-size: 0.8rem;
+		color: #444;
+		margin: 0;
+		padding: 0 0.75rem 0.75rem 0.75rem;
+	}
+
+	.sm-caption .sm-dot {
+		vertical-align: baseline;
+	}
+
+	@media (max-width: 720px) {
+		.sm-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

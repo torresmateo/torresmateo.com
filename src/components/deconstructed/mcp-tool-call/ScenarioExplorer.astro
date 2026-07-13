@@ -1,0 +1,245 @@
+---
+import { SCENARIOS, newStepCount } from './steps';
+import Timeline from './Timeline.astro';
+
+// The centerpiece of the post: a sidebar of prompts, each of which swaps the
+// entire storyline shown in the main panel.
+const DEFAULT_SCENARIO = 'open';
+---
+
+<div class="sx" data-active={DEFAULT_SCENARIO} id="explorer">
+	<aside class="sx-side">
+		<div class="sx-side-title">Pick a prompt</div>
+		{SCENARIOS.map((sc) => (
+			<button
+				type="button"
+				class="sx-card"
+				data-scenario={sc.id}
+				aria-pressed={sc.id === DEFAULT_SCENARIO ? 'true' : 'false'}
+			>
+				<span class="sx-card-head">
+					<span class="sx-letter">{sc.letter}</span>
+					<span class="sx-label">{sc.label}</span>
+				</span>
+				<span class="sx-prompt">“{sc.prompt}”</span>
+				<span class="sx-meta">
+					{sc.steps.length} events · <span class="sx-meta-new">{newStepCount(sc)} green</span>
+				</span>
+				<span class="sx-blurb">{sc.blurb}</span>
+			</button>
+		))}
+	</aside>
+
+	<div class="sx-main">
+		{SCENARIOS.map((sc) => (
+			<section class="sx-panel" data-panel={sc.id} hidden={sc.id !== DEFAULT_SCENARIO}>
+				<p class="sx-panel-lede">
+					<strong>Storyline {sc.letter} · {sc.label}.</strong> {sc.blurb}
+					Solid arrows are requests, dashed arrows coming back are their
+					responses, and dashed boxes are things that happen inside a
+					component, pinned to the lane where they happen. Click any row and
+					it unfolds in place.
+				</p>
+				<Timeline scenario={sc.id} />
+			</section>
+		))}
+	</div>
+</div>
+
+<script>
+	const root = document.getElementById('explorer');
+	if (root) {
+		const cards = root.querySelectorAll<HTMLButtonElement>('.sx-card');
+		const panels = root.querySelectorAll<HTMLElement>('.sx-panel');
+
+		const activate = (id: string, { scroll = false } = {}) => {
+			if (!root.querySelector(`[data-panel="${id}"]`)) return;
+			root.dataset.active = id;
+			cards.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.scenario === id)));
+			panels.forEach((p) => {
+				p.hidden = p.dataset.panel !== id;
+			});
+			if (scroll) root.scrollIntoView({ block: 'start', behavior: 'smooth' });
+		};
+
+		cards.forEach((card) => {
+			card.addEventListener('click', () => activate(card.dataset.scenario!, { scroll: true }));
+		});
+
+		// Deep links: #s-{scenario}-{n} activates the right storyline and opens
+		// the step; #storyline-{scenario} just activates the storyline.
+		const applyHash = () => {
+			const stepMatch = location.hash.match(/^#s-([a-z]+)-(\d+)$/);
+			if (stepMatch) {
+				activate(stepMatch[1]);
+				const el = document.querySelector<HTMLDetailsElement>(location.hash);
+				if (el?.tagName === 'DETAILS') {
+					el.open = true;
+					el.scrollIntoView({ block: 'center' });
+				}
+				return;
+			}
+			const storyMatch = location.hash.match(/^#storyline-([a-z]+)$/);
+			if (storyMatch) activate(storyMatch[1], { scroll: true });
+		};
+		applyHash();
+		window.addEventListener('hashchange', applyHash);
+	}
+</script>
+
+<style>
+	.sx {
+		display: grid;
+		grid-template-columns: 215px minmax(0, 1fr);
+		gap: 1rem;
+		margin: 2rem 0;
+		align-items: start;
+		/* Break out of the 900px article column so the diagrams get full width,
+		   in the distill.pub tradition of wide figures. */
+		width: min(1160px, calc(100vw - 3rem));
+		margin-left: 50%;
+		transform: translateX(-50%);
+	}
+
+	.sx-side {
+		position: sticky;
+		top: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.sx-side-title {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 0.8rem;
+	}
+
+	.sx-card {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		text-align: left;
+		font-family: inherit;
+		background: var(--bg-color);
+		border: 1px solid var(--border-color);
+		padding: 0.55rem 0.6rem;
+		cursor: pointer;
+		color: var(--text-color);
+	}
+
+	.sx-card:hover {
+		background: #f5f5f5;
+	}
+
+	.sx-card[aria-pressed='true'] {
+		border: 2px solid var(--border-color);
+		padding: calc(0.55rem - 1px) calc(0.6rem - 1px);
+		background: #fcfcfc;
+		box-shadow: 3px 3px 0 var(--button-green);
+	}
+
+	.sx-card-head {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.sx-letter {
+		font-family: 'SF Mono', Monaco, Consolas, monospace;
+		font-weight: 700;
+		font-size: 0.85rem;
+		border: 1px solid var(--border-color);
+		width: 1.35rem;
+		height: 1.35rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+
+	.sx-card[aria-pressed='true'] .sx-letter {
+		background: var(--button-green);
+		border-color: var(--button-green);
+		color: #fff;
+	}
+
+	.sx-label {
+		font-weight: 700;
+		font-size: 0.9rem;
+	}
+
+	.sx-prompt {
+		font-size: 0.8rem;
+		font-style: italic;
+		color: #333;
+		line-height: 1.4;
+	}
+
+	.sx-meta {
+		font-family: 'Univers Condensed', 'Univers', Helvetica, Arial, sans-serif;
+		font-size: 0.75rem;
+		color: #555;
+	}
+
+	.sx-meta-new {
+		color: var(--button-green);
+		font-weight: 700;
+	}
+
+	.sx-blurb {
+		font-size: 0.75rem;
+		color: #666;
+		line-height: 1.35;
+	}
+
+	.sx-panel-lede {
+		margin: 0 0 1rem 0;
+		font-size: 0.95rem;
+	}
+
+	@media (max-width: 720px) {
+		.sx {
+			grid-template-columns: minmax(0, 1fr);
+			width: 100%;
+			margin-left: 0;
+			transform: none;
+		}
+
+		.sx-side {
+			position: sticky;
+			top: 0;
+			z-index: 10;
+			background: var(--bg-color);
+			flex-direction: row;
+			gap: 0.4rem;
+			padding: 0.5rem 0;
+			border-bottom: 1px solid var(--border-color);
+		}
+
+		.sx-side-title {
+			display: none;
+		}
+
+		.sx-card {
+			flex: 1;
+			min-width: 0;
+			gap: 0.2rem;
+		}
+
+		.sx-prompt,
+		.sx-blurb {
+			display: none;
+		}
+
+		.sx-meta {
+			font-size: 0.7rem;
+		}
+
+		.sx-label {
+			font-size: 0.8rem;
+		}
+	}
+</style>
